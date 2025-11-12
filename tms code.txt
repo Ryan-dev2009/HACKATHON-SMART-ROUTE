@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SMART ROUTE</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"
+  />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+
+  <style>
+    body {
+      font-family: Inter, Roboto, Arial, sans-serif;
+      margin: 0; padding: 0;
+      display: flex; height: 100vh;
+    }
+    #sidebar {
+      width: 360px; min-width: 300px;
+      background: #f7f8fb; padding: 18px;
+      box-sizing: border-box; overflow: auto;
+      border-right: 1px solid #ddd;
+    }
+    h1 {
+      font-size: 18px; margin: 0 0 12px;
+    }
+    label {
+      display: block; margin-top: 10px; font-size: 13px;
+    }
+    input, select {
+      width: 100%; padding: 10px;
+      border-radius: 8px; border: 1px solid #ddd;
+      margin-top: 6px; box-sizing: border-box;
+    }
+    button {
+      margin-top: 12px; padding: 10px 14px;
+      border-radius: 8px; border: 0;
+      background: #1a73e8; color: white;
+      font-weight: 600; cursor: pointer;
+    }
+    #map { flex: 1; height: 100%; }
+    #info {
+      margin-top: 12px; background: white;
+      padding: 10px; border-radius: 8px;
+      border: 1px solid #e6e9ef;
+    }
+    .muted { color: #666; font-size: 13px; }
+    .small { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <h1>SMART ROUTE</h1>
+    <div class="muted">
+      Enter origin and destination to calculate route.
+    </div>
+
+    <label for="origin">Origin</label>
+    <input id="origin" placeholder="Latitude,Longitude (e.g. 26.1445,91.7362)" value="26.1445,91.7362" />
+
+    <label for="destination">Destination</label>
+    <input id="destination" placeholder="Latitude,Longitude (e.g. 25.5788,91.8933)" value="25.5788,91.8933" />
+
+    <label for="vehicleType">Vehicle Type</label>
+    <select id="vehicleType">
+      <option value="normal">Normal Vehicle</option>
+      <option value="emergency">Emergency Vehicle (Ambulance/Fire)</option>
+      <option value="priority">Priority Vehicle (Police/VIP)</option>
+    </select>
+
+    <button id="go">Show Route</button>
+
+    <div id="info" aria-live="polite">
+      <div id="summary" class="small">No route calculated yet.</div>
+      <div id="details" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <script>
+    const map = L.map('map').setView([26.1445, 91.7362], 8);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    let control;
+
+    function formatTime(minutes) {
+      const hours = Math.floor(minutes / 60);
+      const mins = Math.round(minutes % 60);
+      return hours > 0 ? `${hours}h ${mins}m` : `${mins} min`;
+    }
+
+    document.getElementById('go').addEventListener('click', () => {
+      const originText = document.getElementById('origin').value.trim();
+      const destText = document.getElementById('destination').value.trim();
+      const vehicleType = document.getElementById('vehicleType').value;
+      const summary = document.getElementById('summary');
+      const details = document.getElementById('details');
+
+      if (!originText || !destText) {
+        summary.textContent = 'Please enter both origin and destination.';
+        return;
+      }
+
+      const [olat, olng] = originText.split(',').map(Number);
+      const [dlat, dlng] = destText.split(',').map(Number);
+
+      if (control) map.removeControl(control);
+
+      summary.textContent = 'Calculating route...';
+      details.innerHTML = '';
+
+      // Vehicle priority logic
+      let color = '#1a73e8';
+      let speedFactor = 1.0;
+      if (vehicleType === 'emergency') {
+        color = 'red';
+        speedFactor = 0.6; // 40% faster
+      } else if (vehicleType === 'priority') {
+        color = 'orange';
+        speedFactor = 0.8; // 20% faster
+      }
+
+      // Create routing control with built-in instructions (directions panel)
+      control = L.Routing.control({
+        waypoints: [
+          L.latLng(olat, olng),
+          L.latLng(dlat, dlng)
+        ],
+        router: L.Routing.osrmv1({
+          serviceUrl: 'https://router.project-osrm.org/route/v1'
+        }),
+        lineOptions: { styles: [{ color: color, weight: 5 }] },
+        collapsible: true,
+        showAlternatives: false,
+        fitSelectedRoutes: true
+      }).addTo(map);
+
+      control.on('routesfound', e => {
+        const route = e.routes[0];
+        const distanceKm = (route.summary.totalDistance / 1000).toFixed(2);
+        let durationMin = route.summary.totalTime / 60;
+        durationMin = durationMin * speedFactor;
+
+        summary.innerHTML = `<strong>${distanceKm} km ${formatTime(durationMin)}</strong>`;
+
+        let msg = '';
+        if (vehicleType === 'emergency') {
+          msg = `<b>Emergency Mode:</b> Traffic lights adjusted, lanes cleared for rapid passage.`;
+        } else if (vehicleType === 'priority') {
+          msg = `<b>Priority Mode:</b> Dynamic signal control for VIP/Police vehicles.`;
+        } else {
+          msg = `Normal routing mode active.`;
+        }
+
+        details.innerHTML = `<div class="small">${msg}</div>`;
+      });
+    });
+  </script>
+</body>
+</html>
